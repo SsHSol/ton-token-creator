@@ -308,6 +308,18 @@
     .no-wallet-msg {
       text-align: center; padding: 20px; color: #686880; font-size: 14px;
     }
+    .wallet-list-container {
+      max-height: 420px; overflow-y: auto;
+      scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.08) transparent;
+    }
+    .wallet-list-container::-webkit-scrollbar { width: 4px; }
+    .wallet-list-container::-webkit-scrollbar-track { background: transparent; }
+    .wallet-list-container::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 2px; }
+    .modal-divider {
+      text-align: center; font-size: 11px; color: #555570;
+      padding: 12px 0 8px; margin-bottom: 8px;
+      border-bottom: 1px solid rgba(255,255,255,0.04);
+    }
 
     .footer { text-align: center; font-size: 12px; color: #383840; padding: 24px 0; }
     .toast {
@@ -458,6 +470,17 @@
 
   <div class="footer">Powered by TON Jetton Standard</div>
 
+  <!-- Wallet Selection Modal -->
+  <div id="wallet-modal" class="modal-overlay">
+    <div class="modal">
+      <div class="modal-header">
+        <span id="modal-title">选择钱包</span>
+        <button class="modal-close" id="modal-close-btn">✕</button>
+      </div>
+      <div id="wallet-list" class="wallet-list-container"></div>
+    </div>
+  </div>
+
   <div id="toast" class="toast"></div>
 
   <!-- Buffer polyfill (TON SDK 需要 Buffer 全局) -->
@@ -525,8 +548,9 @@
     TONCreator.setStatusCallback(function(wallet) {
       if (wallet) {
         const addr = wallet.account.address;
-        const friendly = 'EQ' + addr.slice(2); // 简化为 friendly 格式
-        walletName.textContent = 'Tonkeeper';
+        // 通过钱包名或默认显示
+        const displayName = wallet.device?.appName || wallet.name || 'Tonkeeper';
+        walletName.textContent = displayName;
         walletAddr.textContent = formatAddr(addr);
         walletInfo.style.display = 'flex';
         connectBtn.textContent = '已连接';
@@ -546,16 +570,106 @@
       return addr.slice(0, 6) + '...' + addr.slice(-6);
     }
 
+    // ---- 钱包选择弹窗 ----
+    const walletModal = $('wallet-modal');
+    const walletList = $('wallet-list');
+    const modalTitle = $('modal-title');
+    const modalCloseBtn = $('modal-close-btn');
+
+    // 钱包图标颜色映射
+    const walletColors = {
+      'tonkeeper': '#0088cc',
+      'tonhub': '#0055ff',
+      'tonwallet': '#0099aa',
+      'openmask': '#22c55e',
+      'deeplink': '#a855f7',
+      'mytonwallet': '#3b82f6',
+      'tonkite': '#f59e0b',
+    };
+
+    function getWalletColor(name) {
+      const key = name.toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (walletColors[key]) return walletColors[key];
+      // hash-based color
+      let hash = 0;
+      for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
+      const colors = ['#0099cc','#0088cc','#22c55e','#eab308','#ef4444','#a855f7','#ec4899','#06b6d4','#f97316','#14b8a6'];
+      return colors[Math.abs(hash) % colors.length];
+    }
+
+    function addWalletOption(wallet, tag) {
+      const div = document.createElement('button');
+      div.className = 'wallet-option';
+      const color = getWalletColor(wallet.name);
+      const initial = wallet.name.charAt(0).toUpperCase();
+
+      div.innerHTML = `
+        <span class="w-icon" style="background:${color}">${initial}</span>
+        <span>${escapeHtml(wallet.name)}</span>
+        ${tag ? `<span class="w-tag" style="color:${tag.color};background:${tag.color}15">${tag.text}</span>` : ''}
+      `;
+
+      div.addEventListener('click', async () => {
+        walletModal.classList.remove('active');
+        try {
+          setStep(0);
+          showToast(`正在连接 ${wallet.name}...`);
+          await TONCreator.connectWallet(wallet);
+        } catch (e) {
+          showToast('❌ 连接失败: ' + e.message, 'error');
+          console.error(e);
+        }
+      });
+
+      walletList.appendChild(div);
+    }
+
+    function showWalletModal(wallets) {
+      walletList.innerHTML = '';
+
+      const detected = wallets.filter(w => w.isDetected);
+      const others = wallets.filter(w => !w.isDetected);
+
+      modalTitle.textContent = `选择钱包${detected.length > 0 ? '（检测到 ' + detected.length + ' 个）' : ''}`;
+
+      // 已安装的扩展钱包
+      detected.forEach(w => addWalletOption(w, { text: '已安装', color: '#22c55e' }));
+
+      // 分隔线
+      if (detected.length > 0 && others.length > 0) {
+        const divider = document.createElement('div');
+        divider.className = 'modal-divider';
+        divider.textContent = '其他钱包（需手机扫码连接）';
+        walletList.appendChild(divider);
+      }
+
+      // 其他钱包
+      others.forEach(w => addWalletOption(w, null));
+
+      if (wallets.length === 0) {
+        walletList.innerHTML = '<div class="no-wallet-msg">⚠️ 未获取到钱包列表<br><span style="font-size:12px;color:#555570;">请刷新页面后重试</span></div>';
+      }
+
+      walletModal.classList.add('active');
+    }
+
     // ---- 连接钱包 ----
     connectBtn.addEventListener('click', async function() {
       try {
-        setStep(0);
-        showToast('正在连接 Tonkeeper...');
-        await TONCreator.connectWallet();
+        const wallets = await TONCreator.getAvailableWallets();
+        showWalletModal(wallets);
       } catch (e) {
-        showToast('❌ 连接失败: ' + e.message, 'error');
+        showToast('❌ 获取钱包列表失败: ' + e.message, 'error');
         console.error(e);
       }
+    });
+
+    // 关闭弹窗
+    modalCloseBtn.addEventListener('click', () => {
+      walletModal.classList.remove('active');
+    });
+    walletModal.addEventListener('click', (e) => {
+      if (e.target === walletModal) walletModal.classList.remove('active');
     });
 
     disconnectBtn.addEventListener('click', function() {
