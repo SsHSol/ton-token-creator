@@ -489,6 +489,26 @@
   <script src="https://unpkg.com/@tonconnect/sdk@latest/dist/tonconnect-sdk.min.js"></script>
   <!-- TON Creator Bundle (esbuild: ton-creator.js + @ton/core + compiled cells) -->
   <script src="ton-creator.js"></script>
+  <!-- 启动诊断：检查 TONCreator 是否加载成功 -->
+  <script>
+  (function() {
+    if (typeof TONCreator !== 'undefined' && TONCreator) {
+      console.log('✅ TONCreator loaded:', Object.keys(TONCreator).join(', '));
+    } else {
+      console.error('❌ TONCreator is undefined! ton-creator.js bundle failed to initialize.');
+      // 在页面上显示错误
+      var errDiv = document.createElement('div');
+      errDiv.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;background:#ef4444;color:#fff;padding:16px;text-align:center;font-size:14px;font-family:sans-serif;';
+      errDiv.textContent = '⚠️ TON Creator 加载失败，请按 F12 查看控制台错误信息后截图发送给开发者';
+      document.body.prepend(errDiv);
+      // 页面加载完成后，把禁用按钮的提示加上
+      document.addEventListener('DOMContentLoaded', function() {
+        var btn = document.getElementById('create-btn');
+        if (btn) btn.disabled = true;
+      });
+    }
+  })();
+  </script>
   <!-- UI Controller -->
   <script>
   // ======== UI 控制器 ========
@@ -545,6 +565,9 @@
     }
 
     // ---- TON Connect 状态回调 ----
+    if (typeof TONCreator === 'undefined' || !TONCreator) {
+      console.error('TONCreator 未加载，跳过初始化');
+    } else {
     TONCreator.setStatusCallback(function(wallet) {
       if (wallet) {
         const addr = wallet.account.address;
@@ -564,6 +587,7 @@
         createBtn.disabled = true;
       }
     });
+    } // else 块结束
 
     function formatAddr(addr) {
       if (!addr) return '';
